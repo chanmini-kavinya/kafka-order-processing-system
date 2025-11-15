@@ -8,6 +8,7 @@ services:
     environment:
       ZOOKEEPER_CLIENT_PORT: 2181
       ZOOKEEPER_TICK_TIME: 2000
+    restart: unless-stopped
 
   kafka:
     image: confluentinc/cp-kafka:7.4.0
@@ -30,6 +31,7 @@ services:
       interval: 5s
       timeout: 5s
       retries: 10
+    restart: unless-stopped
 
   schema-registry:
     image: confluentinc/cp-schema-registry:7.4.0
@@ -48,6 +50,7 @@ services:
       interval: 5s
       timeout: 5s
       retries: 10
+    restart: unless-stopped
 
   kafka-ui:
     image: provectuslabs/kafka-ui:latest
@@ -62,6 +65,7 @@ services:
       KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS: kafka:9092
       KAFKA_CLUSTERS_0_ZOOKEEPER: zookeeper:2181
       KAFKA_CLUSTERS_0_SCHEMAREGISTRY: http://schema-registry:8081
+    restart: unless-stopped
 
   order-producer:
     build:
@@ -79,6 +83,18 @@ services:
     volumes:
       - ./schemas:/app/schemas
       - ./config.py:/app/config.py
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "from producer import OrderProducer; print('OK')",
+        ]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    restart: unless-stopped
 
   order-consumer:
     build:
@@ -96,3 +112,36 @@ services:
     volumes:
       - ./schemas:/app/schemas
       - ./config.py:/app/config.py
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "from consumer import OrderConsumer; print('OK')",
+        ]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    restart: unless-stopped
+
+  dashboard:
+    build: ./dashboard
+    container_name: order-dashboard
+    ports:
+      - "5000:5000"
+    depends_on:
+      - kafka
+      - order-consumer
+    environment:
+      KAFKA_BROKER: kafka:9092
+    volumes:
+      - ./schemas:/app/schemas
+      - ./config.py:/app/config.py
+      - /var/run/docker.sock:/var/run/docker.sock # ADD THIS LINE
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    restart: unless-stopped
