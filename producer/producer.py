@@ -56,7 +56,7 @@ class OrderProducer:
                 
                 print(f"Produced order: {order}")
                 
-                time.sleep(3)
+                time.sleep(10)
                 
                 if self.produced_count % 5 == 0:
                     self.producer.flush()
