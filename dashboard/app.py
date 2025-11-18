@@ -52,38 +52,29 @@ class LogParser:
         for line in lines:
             if not line.strip():
                 continue
-                
-            if 'Processed order:' in line:
-                current_total += 1
+
+            if 'Successfully processed order' in line:
                 current_success += 1
-                
+
+            if 'Sent to DLQ' in line:
+                current_dlq += 1
+
+            if 'Processed order:' in line:
                 price_match = re.search(r'Price: \$([\d.]+)', line)
                 if price_match:
                     price = float(price_match.group(1))
                     prices.append(price)
                     total_sum += price
-            
-            avg_match = re.search(r'Running average price: \$([\d.]+)', line)
-            if avg_match:
-                metrics['running_average'] = float(avg_match.group(1))
-            
-            if 'Sent to retry topic' in line:
-                current_retry += 1
-            
-            if 'Sent to DLQ' in line:
-                current_dlq += 1
-        
-        if current_total > 0:
-            metrics['total_orders'] = current_total
-            metrics['success_count'] = current_success
-            metrics['retry_count'] = current_retry
-            metrics['dlq_count'] = current_dlq
-            metrics['total_price_sum'] = total_sum
-            
-            metrics['recent_prices'] = prices[-20:]  
-            
-            metrics['last_updated'] = time.time()
 
+        current_total = current_success + current_dlq
+        metrics['total_orders'] = current_total
+        metrics['success_count'] = current_success
+        metrics['dlq_count'] = current_dlq
+        metrics['recent_prices'] = prices[-20:]
+        metrics['total_price_sum'] = total_sum
+        metrics['last_updated'] = time.time()
+        metrics['running_average'] = (sum(prices) / len(prices)) if prices else 0.0
+    
     def stop(self):
         self.running = False
 
@@ -107,8 +98,7 @@ def health_check():
 @app.route('/metrics')
 def get_metrics():
     total_processed = metrics['success_count'] + metrics['dlq_count']
-    success_rate = (metrics['success_count'] / total_processed * 100) if total_processed > 0 else 0
-    
+    success_rate = (metrics['success_count'] / metrics['total_orders'] * 100) if metrics['total_orders'] > 0 else 0
     return jsonify({
         'total_orders': metrics['total_orders'],
         'running_average': round(metrics['running_average'], 2),
@@ -121,5 +111,5 @@ def get_metrics():
     })
 
 if __name__ == '__main__':
-    print("🚀 Starting Kafka Order Dashboard (Log Parser Mode)...")
+    print("Starting Kafka Order Dashboard (Log Parser Mode)...")
     app.run(host='0.0.0.0', port=5000, debug=False)
