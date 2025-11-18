@@ -9,11 +9,19 @@ from config import KAFKA_CONFIG, TOPICS, AVRO_SCHEMA_FILE, SCHEMA_REGISTRY_URL, 
 
 class OrderConsumer:
     def __init__(self):
+        
+        def from_dict(obj, ctx):
+            return obj
+        
         with open(AVRO_SCHEMA_FILE, 'r') as f:
             schema_str = f.read()
         
         self.schema_registry_client = SchemaRegistryClient({'url': SCHEMA_REGISTRY_URL})
-        self.avro_deserializer = AvroDeserializer(self.schema_registry_client, schema_str)
+        self.avro_deserializer = AvroDeserializer(
+            self.schema_registry_client,
+            schema_str,
+            from_dict
+        )
         
         consumer_config = {
             'bootstrap.servers': KAFKA_CONFIG['bootstrap.servers'],
@@ -31,6 +39,8 @@ class OrderConsumer:
         
         self.total_price = 0.0
         self.order_count = 0
+        self.success_count = 0
+        self.dlq_count = 0
         self.running_average = 0.0
         self.retry_counts = {}
 
@@ -60,7 +70,7 @@ class OrderConsumer:
     def is_retry_message(self, message):
         if message.topic() == TOPICS['retry']:
             try:
-                retry_data = json.loads(message.value())
+                retry_data = json.loads(message.value().decode("utf-8"))
                 return True, retry_data
             except:
                 pass
@@ -73,24 +83,30 @@ class OrderConsumer:
         return None
 
     def process_order(self, order):
-        order_id = order['orderId']
-        price = order['price']
-        product = order['product']
-        
-        if str(price).endswith('.99'):
-            raise Exception("Temporary processing failure - price ends with .99")
-        
-        if price > 900:
-            raise ValueError("Price too high - permanent failure")
-        
-        self.total_price += price
-        self.order_count += 1
-        self.running_average = self.total_price / self.order_count
-        
-        print(f"Processed order: {order_id}, Product: {product}, Price: ${price}")
-        print(f"Running average price: ${self.running_average:.2f}")
-        
-        return True
+        order_id = order.get('orderId')
+        price = order.get('price')
+        product = order.get('product')
+
+        if not order_id or not product or price is None:
+            raise ValueError("Invalid order data: missing required fields")
+
+        if price < 0:
+            raise ValueError(f"Order {order_id} has negative price")
+        if price > 10000:
+            raise ValueError(f"Order {order_id} price too high")
+
+        try:
+            self.total_price += price
+            self.order_count += 1
+            self.running_average = self.total_price / self.order_count
+
+            print(f"Processed order: {order_id}, Product: {product}, Price: ${price}")
+            print(f"Running average price: ${self.running_average:.2f}")
+
+            return True
+
+        except Exception as e:
+            raise Exception(f"Temporary processing failure for order {order_id}: {e}")
 
     def handle_retry_message(self, retry_data, message):
         original_message = retry_data['original_message']
@@ -145,15 +161,16 @@ class OrderConsumer:
         
         try:
             success = self.process_order(order)
-            
             if success:
+                self.success_count += 1
                 print(f"Successfully processed order {order_id}")
                 if order_id in self.retry_counts:
                     del self.retry_counts[order_id]
-            
+
         except ValueError as e:
             print(f"Permanent failure for order {order_id}: {e}")
             self.send_to_dlq(order, str(e), message.key())
+            self.dlq_count += 1
             
         except Exception as e:
             print(f"Temporary failure for order {order_id}: {e}")
@@ -177,8 +194,12 @@ class OrderConsumer:
                 print(f"Max retries exceeded for order {order_id}")
                 self.send_to_dlq(order, f"Max retries exceeded: {e}", message.key())
 
+        total_orders = self.success_count + self.dlq_count
+        success_rate = (self.success_count / total_orders) * 100 if total_orders > 0 else 0
+        print(f"Metrics -> Total Orders: {total_orders}, Success Count: {self.success_count}, DLQ Count: {self.dlq_count}, Success Rate: {success_rate:.2f}%")
+
     def consume_orders(self):
-        print("Starting order consumer (main + retry topics)...")
+        print("Starting order consumer...")
         
         try:
             while True:

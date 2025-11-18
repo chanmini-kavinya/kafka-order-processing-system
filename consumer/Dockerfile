@@ -9,4 +9,4 @@ COPY consumer/consumer.py /app/consumer.py
 COPY schemas /app/schemas
 COPY config.py /app/config.py
 
-CMD ["python", "consumer.py"]
+CMD ["python", "-u", "consumer.py"]
