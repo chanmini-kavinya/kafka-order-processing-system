@@ -112,17 +112,6 @@ services:
     volumes:
       - ./schemas:/app/schemas
       - ./config.py:/app/config.py
-    healthcheck:
-      test:
-        [
-          "CMD",
-          "python",
-          "-c",
-          "from consumer import OrderConsumer; print('OK')",
-        ]
-      interval: 30s
-      timeout: 10s
-      retries: 3
     restart: unless-stopped
 
   dashboard:
@@ -138,7 +127,7 @@ services:
     volumes:
       - ./schemas:/app/schemas
       - ./config.py:/app/config.py
-      - /var/run/docker.sock:/var/run/docker.sock # ADD THIS LINE
+      - /var/run/docker.sock:/var/run/docker.sock
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:5000/health"]
       interval: 30s
