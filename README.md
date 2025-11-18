@@ -43,7 +43,7 @@ This will start the following services:
 ### 3. Access UI
 
 - **Kafka UI**: [http://localhost:8080](http://localhost:8080)  
-  View topics, messages, and consumer offsets.  
+  View and monitor Kafka cluster in real-time.
 
 - **Dashboard**: [http://localhost:5000](http://localhost:5000)  
   Displays metrics such as:
