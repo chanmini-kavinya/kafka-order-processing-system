@@ -26,7 +26,7 @@ cd kafka-order-processing-system
 
 ### 2. Start the system
 ```bash
-docker-compose up -d
+docker-compose up -d --build
 ```
 
 This will start the following services:
@@ -58,18 +58,7 @@ This will start the following services:
 
 ---
 
-### 4. Resetting the Environment
-
-If you encounter **unhealthy container issues**, run the following commands to reset everything:
-
-```bash
-docker-compose down -v --remove-orphans
-docker-compose up -d
-```
-
----
-
-### 5. Stop the System
+### 4. Stop the System
 ```bash
 docker-compose down
 ```
