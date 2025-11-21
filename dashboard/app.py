@@ -1,85 +1,110 @@
 import json
 import time
-import re
-import subprocess
-from flask import Flask, render_template, jsonify
-from flask_cors import CORS
-import threading
+from threading import Thread
+from flask import Flask, jsonify, render_template
+from confluent_kafka import Consumer
+from confluent_kafka.schema_registry import SchemaRegistryClient
+from confluent_kafka.schema_registry.avro import AvroDeserializer
+
+from config import KAFKA_CONFIG, TOPICS, AVRO_SCHEMA_FILE, SCHEMA_REGISTRY_URL
 
 app = Flask(__name__)
-CORS(app)
 
 metrics = {
-    'total_orders': 0,
+    'total_orders_from_main': 0,
     'running_average': 0.0,
     'success_count': 0,
     'retry_count': 0,
     'dlq_count': 0,
     'recent_prices': [],
     'total_price_sum': 0.0,
-    'last_updated': None
+    'last_updated': None,
+    'seen_order_ids': set()
 }
 
-class LogParser:
-    def __init__(self):
-        self.running = True
-        
-    def parse_consumer_logs(self):
-        while self.running:
-            try:
-                result = subprocess.run([
-                    'docker', 'logs', '--tail', '100', 'order-consumer'
-                ], capture_output=True, text=True, timeout=10)
-                
-                if result.returncode == 0:
-                    self.process_logs(result.stdout)
-                
-            except Exception as e:
-                print(f"Error reading logs: {e}")
-            
-            time.sleep(3)  
+with open(AVRO_SCHEMA_FILE, 'r') as f:
+    schema_str = f.read()
 
-    def process_logs(self, log_output):
-        lines = log_output.split('\n')
-        
-        current_total = 0
-        current_success = 0
-        current_retry = 0
-        current_dlq = 0
-        prices = []
-        total_sum = 0.0
-        
-        for line in lines:
-            if not line.strip():
+schema_registry_client = SchemaRegistryClient({'url': SCHEMA_REGISTRY_URL})
+avro_deserializer = AvroDeserializer(schema_registry_client, schema_str, lambda obj, ctx: obj)
+
+class KafkaMetricsConsumer:
+    def __init__(self):
+        consumer_config = {
+            'bootstrap.servers': KAFKA_CONFIG['bootstrap.servers'],
+            'group.id': 'metrics-dashboard',
+            'auto.offset.reset': 'earliest',
+            'enable.auto.commit': False
+        }
+        self.consumer = Consumer(consumer_config)
+        self.consumer.subscribe([TOPICS['main'], TOPICS['retry'], TOPICS['dead_letter']])
+        self.running = True
+
+    def consume_metrics(self):
+        while self.running:
+            msg = self.consumer.poll(timeout=1.0)
+            if msg is None:
+                continue
+            if msg.error():
                 continue
 
-            if 'Successfully processed order' in line:
-                current_success += 1
+            topic = msg.topic()
 
-            if 'Sent to DLQ' in line:
-                current_dlq += 1
+            if topic == TOPICS['main']:
+                try:
+                    order = avro_deserializer(msg.value(), None)
+                    if order and 'price' in order and 'orderId' in order:
+                        order_id = order['orderId']
+                        price = order['price']
+                        
+                        if order_id not in metrics['seen_order_ids']:
+                            metrics['seen_order_ids'].add(order_id)
+                            metrics['total_orders_from_main'] += 1
+                            metrics['recent_prices'].append(price)
+                            metrics['total_price_sum'] += price
+                except Exception as e:
+                    continue
+                    
+            elif topic == TOPICS['retry']:
+                try:
+                    retry_data = json.loads(msg.value().decode('utf-8'))
+                    if 'original_message' in retry_data:
+                        metrics['retry_count'] += 1
+                except:
+                    metrics['retry_count'] += 1
+                    
+            elif topic == TOPICS['dead_letter']:
+                try:
+                    dlq_data = json.loads(msg.value().decode('utf-8'))
+                    if 'original_message' in dlq_data:
+                        original_order = dlq_data['original_message']
+                        if 'orderId' in original_order and 'price' in original_order:
+                            order_id = original_order['orderId']
+                            price = original_order['price']
+                            
+                            if price in metrics['recent_prices']:
+                                metrics['recent_prices'].remove(price)
+                                metrics['total_price_sum'] -= price
+                            
+                        metrics['dlq_count'] += 1
+                except:
+                    metrics['dlq_count'] += 1
 
-            if 'Processed order:' in line:
-                price_match = re.search(r'Price: \$([\d.]+)', line)
-                if price_match:
-                    price = float(price_match.group(1))
-                    prices.append(price)
-                    total_sum += price
+            metrics['success_count'] = metrics['total_orders_from_main'] - metrics['dlq_count']
+            
+            metrics['recent_prices'] = metrics['recent_prices'][-20:]
+            
+            if metrics['success_count'] > 0:
+                metrics['running_average'] = metrics['total_price_sum'] / metrics['success_count']
+                
+            metrics['last_updated'] = time.time()
 
-        current_total = current_success + current_dlq
-        metrics['total_orders'] = current_total
-        metrics['success_count'] = current_success
-        metrics['dlq_count'] = current_dlq
-        metrics['recent_prices'] = prices[-20:]
-        metrics['total_price_sum'] = total_sum
-        metrics['last_updated'] = time.time()
-        metrics['running_average'] = (sum(prices) / len(prices)) if prices else 0.0
-    
     def stop(self):
         self.running = False
+        self.consumer.close()
 
-log_parser = LogParser()
-thread = threading.Thread(target=log_parser.parse_consumer_logs)
+kafka_metrics = KafkaMetricsConsumer()
+thread = Thread(target=kafka_metrics.consume_metrics)
 thread.daemon = True
 thread.start()
 
@@ -92,15 +117,16 @@ def health_check():
     return jsonify({
         'status': 'healthy',
         'timestamp': time.time(),
-        'message': 'Dashboard is running and parsing logs'
+        'message': 'Dashboard is running and reading metrics from Kafka'
     })
 
 @app.route('/metrics')
 def get_metrics():
-    total_processed = metrics['success_count'] + metrics['dlq_count']
-    success_rate = (metrics['success_count'] / metrics['total_orders'] * 100) if metrics['total_orders'] > 0 else 0
+    total_processed = metrics['total_orders_from_main']
+    success_rate = (metrics['success_count'] / total_processed * 100) if total_processed > 0 else 0
+    
     return jsonify({
-        'total_orders': metrics['total_orders'],
+        'total_orders': total_processed,
         'running_average': round(metrics['running_average'], 2),
         'success_count': metrics['success_count'],
         'retry_count': metrics['retry_count'],
@@ -111,5 +137,5 @@ def get_metrics():
     })
 
 if __name__ == '__main__':
-    print("Starting Kafka Order Dashboard (Log Parser Mode)...")
+    print("Starting Kafka Metrics Dashboard...")
     app.run(host='0.0.0.0', port=5000, debug=False)
