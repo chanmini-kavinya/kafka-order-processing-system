@@ -52,6 +52,7 @@ This will start the following services:
   Displays real-time metrics:
     -   Total orders processed
     -   Success count
+    -   Retried count
     -   DLQ count
     -   Success rate
     -   Running average price
