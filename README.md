@@ -1,18 +1,21 @@
 # Kafka Order Processing System
 
-A Kafka-based system for producing and consuming order messages with Avro serialization, real-time price aggregation, retry logic, and a Dead Letter Queue (DLQ). The system includes a web dashboard for monitoring order metrics.
+A Kafka-based system for producing and consuming order messages with
+Avro serialization, real-time price aggregation, retry logic, and a Dead
+Letter Queue (DLQ). The system also includes a Flask-based web dashboard
+for real-time monitoring of order metrics.
 
 ---
 
 ## Features
 
-- Avro serialization for order messages  
-- Real-time price aggregation (running average)  
-- Retry logic for temporary failures  
-- Dead Letter Queue (DLQ) for permanent failures  
-- Dockerized for easy setup  
-- Kafka UI for monitoring  
-- Web dashboard for real-time metrics (success rate, DLQ count, running average price, recent prices)
+-   Avro serialization for order messages
+-   Real-time price aggregation (running average)
+-   Retry logic for temporary failures
+-   Dead Letter Queue (DLQ) for permanent failures
+-   Dockerized for easy setup
+-   Kafka UI for monitoring
+-   Flask web dashboard for real-time metrics
 
 ---
 
@@ -46,15 +49,13 @@ This will start the following services:
   View and monitor Kafka cluster in real-time.
 
 - **Dashboard**: [http://localhost:5000](http://localhost:5000)  
-  Displays metrics such as:
-  - Total orders processed  
-  - Success count  
-  - DLQ count  
-  - Success rate  
-  - Running average price  
-  - Recent order prices  
-
-![Dashboard Screenshot](assets/dashboard_screenshot.png)
+  Displays real-time metrics:
+    -   Total orders processed
+    -   Success count
+    -   DLQ count
+    -   Success rate
+    -   Running average price
+    -   Recent prices
 
 ---
 
