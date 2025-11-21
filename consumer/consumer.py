@@ -102,7 +102,7 @@ class OrderConsumer:
             raise ValueError(f"Order {order_id} price too high")
 
         # SIMULATE RANDOM FAILURES
-        if random.random() < 0.3:
+        if random.random() < 0.2:
             if random.random() < 0.5:
                 raise ValueError(f"Simulated permanent failure for order {order_id}")
             else:
