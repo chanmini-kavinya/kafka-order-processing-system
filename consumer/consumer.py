@@ -1,4 +1,5 @@
 import json
+import random
 import time
 from confluent_kafka import Consumer, Producer
 from confluent_kafka.serialization import SerializationContext, MessageField
@@ -100,6 +101,13 @@ class OrderConsumer:
         if price > 10000:
             raise ValueError(f"Order {order_id} price too high")
 
+        # SIMULATE RANDOM FAILURES
+        if random.random() < 0.3:
+            if random.random() < 0.5:
+                raise ValueError(f"Simulated permanent failure for order {order_id}")
+            else:
+                raise Exception(f"Simulated temporary failure for order {order_id}")
+                
         self.total_price += price
         self.order_count += 1
         self.running_average = self.total_price / self.order_count
